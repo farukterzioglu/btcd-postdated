@@ -541,6 +541,21 @@ type TransferTransactionCmd struct {
 	TxId    string
 }
 
+// TODO : Write summary
+func NewSendPostDatedTxCmd(address string, amount int64, lockTime uint32) *SendPostDatedTxCmd {
+	return &SendPostDatedTxCmd{
+		Address:  address,
+		Amount:   amount,
+		LockTime: lockTime,
+	}
+}
+
+type SendPostDatedTxCmd struct {
+	Address  string
+	Amount   int64
+	LockTime uint32
+}
+
 // NewSendToAddressCmd returns a new instance which can be used to issue a
 // sendtoaddress JSON-RPC command.
 //
