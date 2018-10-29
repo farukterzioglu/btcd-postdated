@@ -485,6 +485,17 @@ func (c *Client) TransferTransaction(address btcutil.Address, txId string) (*cha
 	return c.TransferTransactionAsync(address, txId).Receive()
 }
 
+// TODO : Write summary
+func (c *Client) SendPostDatedTransactionAsync(address btcutil.Address, amount int64, lockTime uint32) FutureTransferTransactionResult {
+	addr := address.EncodeAddress()
+	cmd := btcjson.NewSendPostDatedTxCmd(addr, amount, lockTime)
+	return c.sendCmd(cmd)
+}
+
+func (c *Client) SendPostDatedTransaction(address btcutil.Address, amount int64, lockTime uint32) (*chainhash.Hash, error) {
+	return c.SendPostDatedTransactionAsync(address, amount, lockTime).Receive()
+}
+
 // FutureSendToAddressResult is a future promise to deliver the result of a
 // SendToAddressAsync RPC invocation (or an applicable error).
 type FutureSendToAddressResult chan *response
