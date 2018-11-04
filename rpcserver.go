@@ -215,6 +215,7 @@ var rpcAskWallet = map[string]struct{}{
 	"sendmany":               {},
 	"sendtoaddress":          {},
 	"transfertransaction":    {},
+	"sendpostdatedtx":        {},
 	"setaccount":             {},
 	"settxfee":               {},
 	"signmessage":            {},
