@@ -1021,6 +1021,21 @@ func TestWalletSvrCmds(t *testing.T) {
 			},
 		},
 		{
+			name: "sendpostdatedtx",
+			newCmd: func() (interface{}, error) {
+				return btcjson.NewCmd("sendpostdatedtx", "1Address", 10, 1)
+			},
+			staticCmd: func() interface{} {
+				return btcjson.NewSendPostDatedTxCmd("1Address", 10, 1)
+			},
+			marshalled: `{"jsonrpc":"1.0","method":"sendpostdatedtx","params":["1Address",10,1],"id":1}`,
+			unmarshalled: &btcjson.SendPostDatedTxCmd{
+				Address:  "1Address",
+				Amount:   10,
+				LockTime: 1,
+			},
+		},
+		{
 			name: "sendtoaddress",
 			newCmd: func() (interface{}, error) {
 				return btcjson.NewCmd("sendtoaddress", "1Address", 0.5)
