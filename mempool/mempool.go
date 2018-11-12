@@ -1082,6 +1082,20 @@ func (mp *TxPool) ProcessTransaction(tx *btcutil.Tx, allowOrphan, rateLimit bool
 		return acceptedTxs, nil
 	}
 
+	// TODO : Add additional comments
+	// This needs to be called before processing orphan transactions
+	// because coincase tx which is the only input of a post-dated tx is not in mempool,
+	// it will be count as orphan tx
+	txPd, err := mp.maybeAddPostDated(tx)
+	if err != nil {
+		return nil, err
+	}
+
+	if txPd != nil {
+		acceptedTxs := []*TxDesc{txPd}
+		return acceptedTxs, nil
+	}
+
 	// The transaction is an orphan (has inputs missing).  Reject
 	// it if the flag to allow orphans is not set.
 	if !allowOrphan {
@@ -1103,6 +1117,23 @@ func (mp *TxPool) ProcessTransaction(tx *btcutil.Tx, allowOrphan, rateLimit bool
 	// Potentially add the orphan transaction to the orphan pool.
 	err = mp.maybeAddOrphan(tx, tag)
 	return nil, err
+}
+
+func (mp *TxPool) maybeAddPostDated(tx *btcutil.Tx) (*TxDesc, error) {
+	// Check if it is post-dated tx
+	if tx.MsgTx().Version != 3 {
+		return nil, nil
+	}
+
+	//txHash := tx.Hash()
+
+	// Check the input if it is coincase
+
+	// Some checks have already done inside 'maybeAcceptTransaction' method until
+	// missing parents check. 'maybeAcceptTransaction' return since coincase tx
+	// isn't exist in mempool or blockchain. Rest of the check need to happen in here
+
+	return nil, nil
 }
 
 // Count returns the number of transactions in the main pool.  It does not
