@@ -280,6 +280,15 @@ func NewTxOut(value int64, pkScript []byte) *TxOut {
 	}
 }
 
+// Post dated transaction feature
+type MsgPostDatedTx struct {
+	CoincaseMgsTx *MsgTx
+	Version       int32
+	TxIn          []*TxIn
+	TxOut         []*TxOut
+	LockTime      uint32
+}
+
 // MsgTx implements the Message interface and represents a bitcoin tx message.
 // It is used to deliver transaction information in response to a getdata
 // message (MsgGetData) for a given transaction.
