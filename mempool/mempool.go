@@ -1136,6 +1136,40 @@ func (mp *TxPool) maybeAddPostDated(tx *btcutil.Tx) (*TxDesc, error) {
 	return nil, nil
 }
 
+func IsPostDated(tx *btcutil.Tx) bool {
+	msgTx := tx.MsgTx()
+
+	// A post-dated tx must only have one transaction input.
+	if len(msgTx.TxIn) != 1 {
+		return false
+	}
+
+	// TODO : Implement this
+	//if IsCoincaseTx(msgTx.TxIn[0]) {
+	//}
+
+	return false
+}
+
+// TODO : Add description
+// Reference IsCoinBaseTx (validate.go:89)
+func IsCoincaseTx(msgTx *wire.MsgTx) bool {
+	// A coincase must only have one transaction input.
+	if len(msgTx.TxIn) != 1 {
+		return false
+	}
+
+	// The previous output of a coincase must have a max value index and
+	// a zero hash.
+	zeroHash := chainhash.Hash{}
+	prevOut := &msgTx.TxIn[0].PreviousOutPoint
+	if prevOut.Index != math.MaxUint32 || prevOut.Hash != zeroHash {
+		return false
+	}
+
+	return true
+}
+
 // Count returns the number of transactions in the main pool.  It does not
 // include the orphan pool.
 //
