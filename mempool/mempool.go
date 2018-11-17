@@ -678,7 +678,8 @@ func (mp *TxPool) maybeAcceptTransaction(tx *btcutil.Tx, isNew, rateLimit, rejec
 	}
 
 	// A standalone transaction must not be a coinbase transaction.
-	if blockchain.IsCoinBase(tx) {
+	// Coincase tx is also a coinbase tx, so bypass if it is coincase
+	if !blockchain.IsCoincase(tx) && blockchain.IsCoinBase(tx) {
 		str := fmt.Sprintf("transaction %v is an individual coinbase",
 			txHash)
 		return nil, nil, txRuleError(wire.RejectInvalid, str)
@@ -1127,8 +1128,6 @@ func (mp *TxPool) maybeAddPostDated(tx *btcutil.Tx) (*TxDesc, error) {
 
 	//txHash := tx.Hash()
 
-	// Check the input if it is coincase
-
 	// Some checks have already done inside 'maybeAcceptTransaction' method until
 	// missing parents check. 'maybeAcceptTransaction' return since coincase tx
 	// isn't exist in mempool or blockchain. Rest of the check need to happen in here
@@ -1144,30 +1143,7 @@ func IsPostDated(tx *btcutil.Tx) bool {
 		return false
 	}
 
-	// TODO : Implement this
-	//if IsCoincaseTx(msgTx.TxIn[0]) {
-	//}
-
 	return false
-}
-
-// TODO : Add description
-// Reference IsCoinBaseTx (validate.go:89)
-func IsCoincaseTx(msgTx *wire.MsgTx) bool {
-	// A coincase must only have one transaction input.
-	if len(msgTx.TxIn) != 1 {
-		return false
-	}
-
-	// The previous output of a coincase must have a max value index and
-	// a zero hash.
-	zeroHash := chainhash.Hash{}
-	prevOut := &msgTx.TxIn[0].PreviousOutPoint
-	if prevOut.Index != math.MaxUint32 || prevOut.Hash != zeroHash {
-		return false
-	}
-
-	return true
 }
 
 // Count returns the number of transactions in the main pool.  It does not

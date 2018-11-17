@@ -306,13 +306,6 @@ func (c *Client) SendRawTransaction(tx *wire.MsgTx, allowHighFees bool) (*chainh
 	return c.SendRawTransactionAsync(tx, allowHighFees).Receive()
 }
 
-// TODO : Add description
-func (c *Client) SendRawPostDatedTransaction(tx *wire.MsgPostDatedTx, allowHighFees bool) (*chainhash.Hash, error) {
-	// TODO : Implement this
-	return nil, nil
-	//return c.SendRawTransactionAsync(tx, allowHighFees).Receive()
-}
-
 // FutureSignRawTransactionResult is a future promise to deliver the result
 // of one of the SignRawTransactionAsync family of RPC invocations (or an
 // applicable error).

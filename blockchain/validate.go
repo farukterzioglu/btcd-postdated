@@ -78,6 +78,24 @@ func ShouldHaveSerializedBlockHeight(header *wire.BlockHeader) bool {
 	return header.Version >= serializedHeightVersion
 }
 
+// TODO : Add description
+func IsCoincase(tx *btcutil.Tx) bool {
+	return IsCoincaseTx(tx.MsgTx())
+}
+func IsCoincaseTx(msgTx *wire.MsgTx) bool {
+	// Coincase is also a coin base transaction
+	if !IsCoinBaseTx(msgTx) {
+		return false
+	}
+
+	// The main difference from coinbase
+	if !txscript.IsCoincaseScript(msgTx.TxIn[0].SignatureScript) {
+		return false
+	}
+
+	return true
+}
+
 // IsCoinBaseTx determines whether or not a transaction is a coinbase.  A coinbase
 // is a special transaction created by miners that has no inputs.  This is
 // represented in the block chain by a transaction with a single input that has
