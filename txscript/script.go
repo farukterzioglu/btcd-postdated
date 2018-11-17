@@ -42,6 +42,10 @@ const (
 	MaxScriptElementSize  = 520 // Max bytes pushable to the stack.
 )
 
+const (
+	CoincaseTxFlags = "/POSTDATED/"
+)
+
 // isSmallInt returns whether or not the opcode is considered a small integer,
 // which is an OP_0, or OP_1 through OP_16.
 func isSmallInt(op *opcode) bool {
@@ -68,6 +72,23 @@ func IsPayToScriptHash(script []byte) bool {
 		return false
 	}
 	return isScriptHash(pops)
+}
+
+func CreateCoincaseScript() ([]byte, error) {
+	return NewScriptBuilder().AddData([]byte(CoincaseTxFlags)).Script()
+}
+
+func isCoincaseScript(pops []parsedOpcode) bool {
+	return len(pops) == 1 &&
+		string(pops[0].data) == CoincaseTxFlags
+}
+
+func IsCoincaseScript(script []byte) bool {
+	pops, err := parseScript(script)
+	if err != nil {
+		return false
+	}
+	return isCoincaseScript(pops)
 }
 
 // isWitnessScriptHash returns true if the passed script is a

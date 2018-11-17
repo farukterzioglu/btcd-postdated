@@ -17,6 +17,8 @@ const (
 	// TxVersion is the current latest supported transaction version.
 	TxVersion = 1
 
+	PostDatedTxVersion = 3
+
 	// MaxTxInSequenceNum is the maximum sequence number the sequence field
 	// of a transaction input can be.
 	MaxTxInSequenceNum uint32 = 0xffffffff
@@ -278,15 +280,6 @@ func NewTxOut(value int64, pkScript []byte) *TxOut {
 		Value:    value,
 		PkScript: pkScript,
 	}
-}
-
-// Post dated transaction feature
-type MsgPostDatedTx struct {
-	CoincaseMgsTx *MsgTx
-	Version       int32
-	TxIn          []*TxIn
-	TxOut         []*TxOut
-	LockTime      uint32
 }
 
 // MsgTx implements the Message interface and represents a bitcoin tx message.
