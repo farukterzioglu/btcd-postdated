@@ -3352,6 +3352,11 @@ func handleSendRawTransaction(s *rpcServer, cmd interface{}, closeChan <-chan st
 	if len(acceptedTxs) == 0 || !acceptedTxs[0].Tx.Hash().IsEqual(tx.Hash()) {
 		s.cfg.TxMemPool.RemoveTransaction(tx, true)
 
+		// It is a post dated tx and it have been added to orphan pool
+		if tx.MsgTx().Version == wire.PostDatedTxVersion {
+			return tx.Hash().String(), nil
+		}
+
 		errStr := fmt.Sprintf("transaction %v is not in accepted list",
 			tx.Hash())
 		return nil, internalRPCError(errStr, "")
