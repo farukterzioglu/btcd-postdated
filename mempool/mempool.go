@@ -560,6 +560,15 @@ func (mp *TxPool) addTransaction(utxoView *blockchain.UtxoViewpoint, tx *btcutil
 // This function MUST be called with the mempool lock held (for reads).
 func (mp *TxPool) checkPoolDoubleSpend(tx *btcutil.Tx) error {
 	for _, txIn := range tx.MsgTx().TxIn {
+
+		// TODO : this check is need to be removed.
+		// Coincase & post-dsated tx related check need to be in its standalone methods
+		// Check if it is the coincase. Coincase txs have inputs with zero hash
+		zeroHash := chainhash.Hash{}
+		if txIn.PreviousOutPoint.Hash == zeroHash {
+			continue
+		}
+
 		if txR, exists := mp.outpoints[txIn.PreviousOutPoint]; exists {
 			str := fmt.Sprintf("output %v already spent by "+
 				"transaction %v in the memory pool",
@@ -631,6 +640,7 @@ func (mp *TxPool) FetchTransaction(txHash *chainhash.Hash) (*btcutil.Tx, error) 
 	return nil, fmt.Errorf("transaction is not in the pool")
 }
 
+// TODO : Duplicated this method for coincase tx & post-dated tx. Remove from below all checks related to post-dated tx
 // maybeAcceptTransaction is the internal function which implements the public
 // MaybeAcceptTransaction.  See the comment for MaybeAcceptTransaction for
 // more details.
@@ -638,6 +648,12 @@ func (mp *TxPool) FetchTransaction(txHash *chainhash.Hash) (*btcutil.Tx, error) 
 // This function MUST be called with the mempool lock held (for writes).
 func (mp *TxPool) maybeAcceptTransaction(tx *btcutil.Tx, isNew, rateLimit, rejectDupOrphans bool) ([]*chainhash.Hash, *TxDesc, error) {
 	txHash := tx.Hash()
+
+	isCoincase := blockchain.IsCoincase(tx)
+
+	if isCoincase {
+		fmt.Println("Transaction is coincase.")
+	}
 
 	// If a transaction has iwtness data, and segwit isn't active yet, If
 	// segwit isn't active yet, then we won't accept it into the mempool as
@@ -679,7 +695,7 @@ func (mp *TxPool) maybeAcceptTransaction(tx *btcutil.Tx, isNew, rateLimit, rejec
 
 	// A standalone transaction must not be a coinbase transaction.
 	// Coincase tx is also a coinbase tx, so bypass if it is coincase
-	if !blockchain.IsCoincase(tx) && blockchain.IsCoinBase(tx) {
+	if !isCoincase && blockchain.IsCoinBase(tx) {
 		str := fmt.Sprintf("transaction %v is an individual coinbase",
 			txHash)
 		return nil, nil, txRuleError(wire.RejectInvalid, str)
@@ -865,7 +881,7 @@ func (mp *TxPool) maybeAcceptTransaction(tx *btcutil.Tx, isNew, rateLimit, rejec
 	// in the next block.  Transactions which are being added back to the
 	// memory pool from blocks that have been disconnected during a reorg
 	// are exempted.
-	if isNew && !mp.cfg.Policy.DisableRelayPriority && txFee < minFee {
+	if !isCoincase && isNew && !mp.cfg.Policy.DisableRelayPriority && txFee < minFee {
 		currentPriority := mining.CalcPriority(tx.MsgTx(), utxoView,
 			nextBlockHeight)
 		if currentPriority <= mining.MinHighPriority {
