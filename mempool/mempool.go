@@ -591,6 +591,7 @@ func (mp *TxPool) CheckSpend(op wire.OutPoint) *btcutil.Tx {
 	return txR
 }
 
+// TODO : Note this method
 // fetchInputUtxos loads utxo details about the input transactions referenced by
 // the passed transaction.  First, it loads the details form the viewpoint of
 // the main chain, then it adjusts them based upon the contents of the
@@ -640,20 +641,174 @@ func (mp *TxPool) FetchTransaction(txHash *chainhash.Hash) (*btcutil.Tx, error) 
 	return nil, fmt.Errorf("transaction is not in the pool")
 }
 
-// TODO : Duplicated this method for coincase tx & post-dated tx. Remove from below all checks related to post-dated tx
+// Copied from maybeAcceptTransaction but has some additional & missing checks for coincase tx
+func (mp *TxPool) maybeAcceptCoincaseTx(tx *btcutil.Tx, rejectDupOrphans bool) ([]*chainhash.Hash, *TxDesc, error) {
+	txHash := tx.Hash()
+
+	// If a transaction has iwtness data, and segwit isn't active yet, If
+	// segwit isn't active yet, then we won't accept it into the mempool as
+	// it can't be mined yet.
+	if tx.MsgTx().HasWitness() {
+		segwitActive, err := mp.cfg.IsDeploymentActive(chaincfg.DeploymentSegwit)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if !segwitActive {
+			str := fmt.Sprintf("transaction %v has witness data, "+
+				"but segwit isn't active yet", txHash)
+			return nil, nil, txRuleError(wire.RejectNonstandard, str)
+		}
+	}
+
+	// Don't accept the transaction if it already exists in the pool.  This
+	// applies to orphan transactions as well when the reject duplicate
+	// orphans flag is set.  This check is intended to be a quick check to
+	// weed out duplicates.
+	if mp.isTransactionInPool(txHash) || (rejectDupOrphans &&
+		mp.isOrphanInPool(txHash)) {
+
+		str := fmt.Sprintf("already have transaction %v", txHash)
+		return nil, nil, txRuleError(wire.RejectDuplicate, str)
+	}
+
+	// Perform preliminary sanity checks on the transaction.  This makes
+	// use of blockchain which contains the invariant rules for what
+	// transactions are allowed into blocks.
+	err := blockchain.CheckCoincaseTransactionSanity(tx)
+	if err != nil {
+		if cerr, ok := err.(blockchain.RuleError); ok {
+			return nil, nil, chainRuleError(cerr)
+		}
+		return nil, nil, err
+	}
+
+	// Commented this block because coincase is also a coinbase tx right now. this may change later.
+	/* // A standalone transaction must not be a coinbase transaction.
+	if blockchain.IsCoinBase(tx) {
+		str := fmt.Sprintf("transaction %v is an individual coinbase",
+			txHash)
+		return nil, nil, txRuleError(wire.RejectInvalid, str)
+	} */
+
+	// Get the current height of the main chain.  A standalone transaction
+	// will be mined into the next block at best, so its height is at least
+	// one more than the current height.
+	bestHeight := mp.cfg.BestHeight()
+	nextBlockHeight := bestHeight + 1
+
+	medianTimePast := mp.cfg.MedianTimePast()
+
+	// Don't allow non-standard transactions if the network parameters
+	// forbid their acceptance.
+	if !mp.cfg.Policy.AcceptNonStd {
+		err = checkTransactionStandard(tx, nextBlockHeight,
+			medianTimePast, mp.cfg.Policy.MinRelayTxFee,
+			mp.cfg.Policy.MaxTxVersion)
+		if err != nil {
+			// Attempt to extract a reject code from the error so
+			// it can be retained.  When not possible, fall back to
+			// a non standard error.
+			rejectCode, found := extractRejectCode(err)
+			if !found {
+				rejectCode = wire.RejectNonstandard
+			}
+			str := fmt.Sprintf("transaction %v is not standard: %v",
+				txHash, err)
+			return nil, nil, txRuleError(rejectCode, str)
+		}
+	}
+
+	// The transaction may not use any of the same outputs as other
+	// transactions already in the pool as that would ultimately result in a
+	// double spend.  This check is intended to be quick and therefore only
+	// detects double spends within the transaction pool itself.  The
+	// transaction could still be double spending coins from the main chain
+	// at this point.  There is a more in-depth check that happens later
+	// after fetching the referenced transaction inputs from the main chain
+	// which examines the actual spend data and prevents double spends.
+	err = mp.checkPoolDoubleSpend(tx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Fetch all of the unspent transaction outputs referenced by the inputs
+	// to this transaction.  This function also attempts to fetch the
+	// transaction itself to be used for detecting a duplicate transaction
+	// without needing to do a separate lookup.
+	// Coincase tx doesn't have any inputs but this block is kept to
+	// fetch the transaction itself for later checks
+	utxoView, err := mp.fetchInputUtxos(tx)
+	if err != nil {
+		if cerr, ok := err.(blockchain.RuleError); ok {
+			return nil, nil, chainRuleError(cerr)
+		}
+		return nil, nil, err
+	}
+
+	// TODO : This check may fail for same amount of coincase tx since their hash may be same
+	// Don't allow the transaction if it exists in the main chain and is not
+	// not already fully spent.
+	prevOut := wire.OutPoint{Hash: *txHash}
+	for txOutIdx := range tx.MsgTx().TxOut {
+		prevOut.Index = uint32(txOutIdx)
+		entry := utxoView.LookupEntry(prevOut)
+		if entry != nil && !entry.IsSpent() {
+			return nil, nil, txRuleError(wire.RejectDuplicate,
+				"transaction already exists")
+		}
+		utxoView.RemoveEntry(prevOut)
+	}
+
+	// Removed the orphan transaction check and inputs check because of coincase doesn't have input
+
+	// NOTE: if you modify this code to accept non-standard transactions,
+	// you should add code here to check that the transaction does a
+	// reasonable number of ECDSA signature verifications.
+
+	// Don't allow transactions with an excessive number of signature
+	// operations which would result in making it impossible to mine.  Since
+	// the coinbase address itself can contain signature operations, the
+	// maximum allowed signature operations per transaction is less than
+	// the maximum allowed signature operations per block.
+	// TODO(roasbeef): last bool should be conditional on segwit activation
+	sigOpCost, err := blockchain.GetSigOpCost(tx, false, utxoView, true, true)
+	if err != nil {
+		if cerr, ok := err.(blockchain.RuleError); ok {
+			return nil, nil, chainRuleError(cerr)
+		}
+		return nil, nil, err
+	}
+	if sigOpCost > mp.cfg.Policy.MaxSigOpCostPerTx {
+		str := fmt.Sprintf("transaction %v sigop cost is too high: %d > %d",
+			txHash, sigOpCost, mp.cfg.Policy.MaxSigOpCostPerTx)
+		return nil, nil, txRuleError(wire.RejectNonstandard, str)
+	}
+
+	// Removed controls for fee because of coincase doesn't have attached fee. This may change later
+	// Removed the control for input signature
+
+	// Add to transaction pool.
+	txD := mp.addTransaction(utxoView, tx, bestHeight, 0)
+
+	log.Debugf("Accepted transaction %v (pool size: %v)", txHash,
+		len(mp.pool))
+
+	return nil, txD, nil
+}
+
 // maybeAcceptTransaction is the internal function which implements the public
 // MaybeAcceptTransaction.  See the comment for MaybeAcceptTransaction for
 // more details.
 //
 // This function MUST be called with the mempool lock held (for writes).
 func (mp *TxPool) maybeAcceptTransaction(tx *btcutil.Tx, isNew, rateLimit, rejectDupOrphans bool) ([]*chainhash.Hash, *TxDesc, error) {
-	txHash := tx.Hash()
-
 	isCoincase := blockchain.IsCoincase(tx)
-
 	if isCoincase {
-		fmt.Println("Transaction is coincase.")
+		return mp.maybeAcceptCoincaseTx(tx, rejectDupOrphans)
 	}
+
+	txHash := tx.Hash()
 
 	// If a transaction has iwtness data, and segwit isn't active yet, If
 	// segwit isn't active yet, then we won't accept it into the mempool as
@@ -695,7 +850,7 @@ func (mp *TxPool) maybeAcceptTransaction(tx *btcutil.Tx, isNew, rateLimit, rejec
 
 	// A standalone transaction must not be a coinbase transaction.
 	// Coincase tx is also a coinbase tx, so bypass if it is coincase
-	if !isCoincase && blockchain.IsCoinBase(tx) {
+	if blockchain.IsCoinBase(tx) {
 		str := fmt.Sprintf("transaction %v is an individual coinbase",
 			txHash)
 		return nil, nil, txRuleError(wire.RejectInvalid, str)
@@ -881,7 +1036,7 @@ func (mp *TxPool) maybeAcceptTransaction(tx *btcutil.Tx, isNew, rateLimit, rejec
 	// in the next block.  Transactions which are being added back to the
 	// memory pool from blocks that have been disconnected during a reorg
 	// are exempted.
-	if !isCoincase && isNew && !mp.cfg.Policy.DisableRelayPriority && txFee < minFee {
+	if isNew && !mp.cfg.Policy.DisableRelayPriority && txFee < minFee {
 		currentPriority := mining.CalcPriority(tx.MsgTx(), utxoView,
 			nextBlockHeight)
 		if currentPriority <= mining.MinHighPriority {

@@ -3298,6 +3298,9 @@ func handleSearchRawTransactions(s *rpcServer, cmd interface{}, closeChan <-chan
 	return srtList, nil
 }
 
+// TODO : Create a new method for Post-dated tx and return hash of coincase & postdatex tx (this return only coincase)
+// Remove both if coincase not accepted or post-dated is not accepted.
+
 // handleSendRawTransaction implements the sendrawtransaction command.
 func handleSendRawTransaction(s *rpcServer, cmd interface{}, closeChan <-chan struct{}) (interface{}, error) {
 	c := cmd.(*btcjson.SendRawTransactionCmd)
