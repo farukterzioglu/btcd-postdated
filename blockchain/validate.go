@@ -80,11 +80,17 @@ func ShouldHaveSerializedBlockHeight(header *wire.BlockHeader) bool {
 
 // TODO : Add description
 func IsCoincase(tx *btcutil.Tx) bool {
-	return IsCoincaseTx(tx.MsgTx())
-}
-func IsCoincaseTx(msgTx *wire.MsgTx) bool {
-	// Coincase is also a coin base transaction
-	if !IsCoinBaseTx(msgTx) {
+	msgTx := tx.MsgTx()
+
+	// A coincase must only have one transaction input.
+	if len(msgTx.TxIn) != 1 {
+		return false
+	}
+
+	// The previous output of a coincase must have a max value index and
+	// a zero hash.
+	prevOut := &msgTx.TxIn[0].PreviousOutPoint
+	if prevOut.Index != math.MaxUint32 || prevOut.Hash != zeroHash {
 		return false
 	}
 
@@ -114,6 +120,11 @@ func IsCoinBaseTx(msgTx *wire.MsgTx) bool {
 	// a zero hash.
 	prevOut := &msgTx.TxIn[0].PreviousOutPoint
 	if prevOut.Index != math.MaxUint32 || prevOut.Hash != zeroHash {
+		return false
+	}
+
+	// Coincase tx is also same with coinbase except Signature script
+	if txscript.IsCoincaseScript(msgTx.TxIn[0].SignatureScript) {
 		return false
 	}
 
@@ -216,6 +227,94 @@ func CalcBlockSubsidy(height int32, chainParams *chaincfg.Params) int64 {
 
 	// Equivalent to: baseSubsidy / 2^(height/subsidyHalvingInterval)
 	return baseSubsidy >> uint(height/chainParams.SubsidyReductionInterval)
+}
+
+// CheckTransactionSanity performs some preliminary checks on a transaction to
+// ensure it is sane.  These checks are context free.
+// This method copied from CheckTransactionSanity but removed checks for coinbase and null inputs
+// And additional checks in CheckTransactionSanity also need to be applied to this method
+func CheckCoincaseTransactionSanity(tx *btcutil.Tx) error {
+	// A transaction must have at least one input.
+	msgTx := tx.MsgTx()
+	if len(msgTx.TxIn) == 0 {
+		return ruleError(ErrNoTxInputs, "transaction has no inputs")
+	}
+
+	// A transaction must have at least one output.
+	if len(msgTx.TxOut) == 0 {
+		return ruleError(ErrNoTxOutputs, "transaction has no outputs")
+	}
+
+	// A transaction must not exceed the maximum allowed block payload when
+	// serialized.
+	serializedTxSize := tx.MsgTx().SerializeSizeStripped()
+	if serializedTxSize > MaxBlockBaseSize {
+		str := fmt.Sprintf("serialized transaction is too big - got "+
+			"%d, max %d", serializedTxSize, MaxBlockBaseSize)
+		return ruleError(ErrTxTooBig, str)
+	}
+
+	// Ensure the transaction amounts are in range.  Each transaction
+	// output must not be negative or more than the max allowed per
+	// transaction.  Also, the total of all outputs must abide by the same
+	// restrictions.  All amounts in a transaction are in a unit value known
+	// as a satoshi.  One bitcoin is a quantity of satoshi as defined by the
+	// SatoshiPerBitcoin constant.
+	var totalSatoshi int64
+	for _, txOut := range msgTx.TxOut {
+		satoshi := txOut.Value
+		if satoshi < 0 {
+			str := fmt.Sprintf("transaction output has negative "+
+				"value of %v", satoshi)
+			return ruleError(ErrBadTxOutValue, str)
+		}
+		if satoshi > btcutil.MaxSatoshi {
+			str := fmt.Sprintf("transaction output value of %v is "+
+				"higher than max allowed value of %v", satoshi,
+				btcutil.MaxSatoshi)
+			return ruleError(ErrBadTxOutValue, str)
+		}
+
+		// Two's complement int64 overflow guarantees that any overflow
+		// is detected and reported.  This is impossible for Bitcoin, but
+		// perhaps possible if an alt increases the total money supply.
+		totalSatoshi += satoshi
+		if totalSatoshi < 0 {
+			str := fmt.Sprintf("total value of all transaction "+
+				"outputs exceeds max allowed value of %v",
+				btcutil.MaxSatoshi)
+			return ruleError(ErrBadTxOutValue, str)
+		}
+		if totalSatoshi > btcutil.MaxSatoshi {
+			str := fmt.Sprintf("total value of all transaction "+
+				"outputs is %v which is higher than max "+
+				"allowed value of %v", totalSatoshi,
+				btcutil.MaxSatoshi)
+			return ruleError(ErrBadTxOutValue, str)
+		}
+	}
+
+	// Check for duplicate transaction inputs.
+	existingTxOut := make(map[wire.OutPoint]struct{})
+	for _, txIn := range msgTx.TxIn {
+		if _, exists := existingTxOut[txIn.PreviousOutPoint]; exists {
+			return ruleError(ErrDuplicateTxInputs, "transaction "+
+				"contains duplicate inputs")
+		}
+		existingTxOut[txIn.PreviousOutPoint] = struct{}{}
+	}
+
+	// TODO : Use coincase script lengths
+	// Coincase script length must be between min and max length.
+	slen := len(msgTx.TxIn[0].SignatureScript)
+	if slen < MinCoinbaseScriptLen || slen > MaxCoinbaseScriptLen {
+		str := fmt.Sprintf("coinbase transaction script length "+
+			"of %d is out of range (min: %d, max: %d)",
+			slen, MinCoinbaseScriptLen, MaxCoinbaseScriptLen)
+		return ruleError(ErrBadCoinbaseScriptLen, str)
+	}
+
+	return nil
 }
 
 // CheckTransactionSanity performs some preliminary checks on a transaction to
@@ -890,11 +989,6 @@ func (b *BlockChain) checkBIP0030(node *blockNode, block *btcutil.Block, view *U
 // NOTE: The transaction MUST have already been sanity checked with the
 // CheckTransactionSanity function prior to calling this function.
 func CheckTransactionInputs(tx *btcutil.Tx, txHeight int32, utxoView *UtxoViewpoint, chainParams *chaincfg.Params) (int64, error) {
-	// Coinbase transactions have no inputs.
-	if IsCoinBase(tx) {
-		return 0, nil
-	}
-
 	txHash := tx.Hash()
 	var totalSatoshiIn int64
 	for txInIndex, txIn := range tx.MsgTx().TxIn {

@@ -74,13 +74,20 @@ func IsPayToScriptHash(script []byte) bool {
 	return isScriptHash(pops)
 }
 
-func CreateCoincaseScript() ([]byte, error) {
-	return NewScriptBuilder().AddData([]byte(CoincaseTxFlags)).Script()
+func CreateCoincaseScript(nextBlockHeight int32, extraNonce uint64) ([]byte, error) {
+	// Add next block height and nonce like coinbase script
+	// This is required because same tx hash will be generated
+	// every time same amount of coincase generated
+	// height + nonce probably generate enough randomization for coincase txs in a block
+	// copied from mining.go: 241 ->
+	return NewScriptBuilder().AddInt64(int64(nextBlockHeight)).
+		AddInt64(int64(extraNonce)).AddData([]byte(CoincaseTxFlags)).
+		Script()
 }
 
 func isCoincaseScript(pops []parsedOpcode) bool {
-	return len(pops) == 1 &&
-		string(pops[0].data) == CoincaseTxFlags
+	return len(pops) == 3 &&
+		string(pops[2].data) == CoincaseTxFlags
 }
 
 func IsCoincaseScript(script []byte) bool {

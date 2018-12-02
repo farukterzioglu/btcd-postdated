@@ -1,3 +1,7 @@
+Forked from github.com/btcsuite/btcd  
+
+WARNING!!! Highly experimental. This fork includes some implementations regarding to post-dated cheques.  
+
 btcd
 ====
 
