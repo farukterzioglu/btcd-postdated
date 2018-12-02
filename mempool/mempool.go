@@ -642,7 +642,7 @@ func (mp *TxPool) FetchTransaction(txHash *chainhash.Hash) (*btcutil.Tx, error) 
 }
 
 // Copied from maybeAcceptTransaction but has some additional & missing checks for coincase tx
-func (mp *TxPool) maybeAcceptCoincaseTx(tx *btcutil.Tx, rejectDupOrphans bool) ([]*chainhash.Hash, *TxDesc, error) {
+func (mp *TxPool) maybeAcceptCoincaseTx(tx *btcutil.Tx, rejectDupOrphans bool) (*TxDesc, error) {
 	txHash := tx.Hash()
 
 	// If a transaction has iwtness data, and segwit isn't active yet, If
@@ -651,13 +651,13 @@ func (mp *TxPool) maybeAcceptCoincaseTx(tx *btcutil.Tx, rejectDupOrphans bool) (
 	if tx.MsgTx().HasWitness() {
 		segwitActive, err := mp.cfg.IsDeploymentActive(chaincfg.DeploymentSegwit)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		if !segwitActive {
 			str := fmt.Sprintf("transaction %v has witness data, "+
 				"but segwit isn't active yet", txHash)
-			return nil, nil, txRuleError(wire.RejectNonstandard, str)
+			return nil, txRuleError(wire.RejectNonstandard, str)
 		}
 	}
 
@@ -669,7 +669,7 @@ func (mp *TxPool) maybeAcceptCoincaseTx(tx *btcutil.Tx, rejectDupOrphans bool) (
 		mp.isOrphanInPool(txHash)) {
 
 		str := fmt.Sprintf("already have transaction %v", txHash)
-		return nil, nil, txRuleError(wire.RejectDuplicate, str)
+		return nil, txRuleError(wire.RejectDuplicate, str)
 	}
 
 	// Perform preliminary sanity checks on the transaction.  This makes
@@ -678,18 +678,17 @@ func (mp *TxPool) maybeAcceptCoincaseTx(tx *btcutil.Tx, rejectDupOrphans bool) (
 	err := blockchain.CheckCoincaseTransactionSanity(tx)
 	if err != nil {
 		if cerr, ok := err.(blockchain.RuleError); ok {
-			return nil, nil, chainRuleError(cerr)
+			return nil, chainRuleError(cerr)
 		}
-		return nil, nil, err
+		return nil, err
 	}
 
-	// Commented this block because coincase is also a coinbase tx right now. this may change later.
-	/* // A standalone transaction must not be a coinbase transaction.
+	// A standalone transaction must not be a coinbase transaction.
 	if blockchain.IsCoinBase(tx) {
 		str := fmt.Sprintf("transaction %v is an individual coinbase",
 			txHash)
-		return nil, nil, txRuleError(wire.RejectInvalid, str)
-	} */
+		return nil, txRuleError(wire.RejectInvalid, str)
+	}
 
 	// Get the current height of the main chain.  A standalone transaction
 	// will be mined into the next block at best, so its height is at least
@@ -715,7 +714,7 @@ func (mp *TxPool) maybeAcceptCoincaseTx(tx *btcutil.Tx, rejectDupOrphans bool) (
 			}
 			str := fmt.Sprintf("transaction %v is not standard: %v",
 				txHash, err)
-			return nil, nil, txRuleError(rejectCode, str)
+			return nil, txRuleError(rejectCode, str)
 		}
 	}
 
@@ -729,7 +728,7 @@ func (mp *TxPool) maybeAcceptCoincaseTx(tx *btcutil.Tx, rejectDupOrphans bool) (
 	// which examines the actual spend data and prevents double spends.
 	err = mp.checkPoolDoubleSpend(tx)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Fetch all of the unspent transaction outputs referenced by the inputs
@@ -741,9 +740,9 @@ func (mp *TxPool) maybeAcceptCoincaseTx(tx *btcutil.Tx, rejectDupOrphans bool) (
 	utxoView, err := mp.fetchInputUtxos(tx)
 	if err != nil {
 		if cerr, ok := err.(blockchain.RuleError); ok {
-			return nil, nil, chainRuleError(cerr)
+			return nil, chainRuleError(cerr)
 		}
-		return nil, nil, err
+		return nil, err
 	}
 
 	// TODO : This check may fail for same amount of coincase tx since their hash may be same
@@ -754,7 +753,7 @@ func (mp *TxPool) maybeAcceptCoincaseTx(tx *btcutil.Tx, rejectDupOrphans bool) (
 		prevOut.Index = uint32(txOutIdx)
 		entry := utxoView.LookupEntry(prevOut)
 		if entry != nil && !entry.IsSpent() {
-			return nil, nil, txRuleError(wire.RejectDuplicate,
+			return nil, txRuleError(wire.RejectDuplicate,
 				"transaction already exists")
 		}
 		utxoView.RemoveEntry(prevOut)
@@ -775,14 +774,14 @@ func (mp *TxPool) maybeAcceptCoincaseTx(tx *btcutil.Tx, rejectDupOrphans bool) (
 	sigOpCost, err := blockchain.GetSigOpCost(tx, false, utxoView, true, true)
 	if err != nil {
 		if cerr, ok := err.(blockchain.RuleError); ok {
-			return nil, nil, chainRuleError(cerr)
+			return nil, chainRuleError(cerr)
 		}
-		return nil, nil, err
+		return nil, err
 	}
 	if sigOpCost > mp.cfg.Policy.MaxSigOpCostPerTx {
 		str := fmt.Sprintf("transaction %v sigop cost is too high: %d > %d",
 			txHash, sigOpCost, mp.cfg.Policy.MaxSigOpCostPerTx)
-		return nil, nil, txRuleError(wire.RejectNonstandard, str)
+		return nil, txRuleError(wire.RejectNonstandard, str)
 	}
 
 	// Removed controls for fee because of coincase doesn't have attached fee. This may change later
@@ -794,7 +793,7 @@ func (mp *TxPool) maybeAcceptCoincaseTx(tx *btcutil.Tx, rejectDupOrphans bool) (
 	log.Debugf("Accepted transaction %v (pool size: %v)", txHash,
 		len(mp.pool))
 
-	return nil, txD, nil
+	return txD, nil
 }
 
 // maybeAcceptTransaction is the internal function which implements the public
@@ -803,11 +802,6 @@ func (mp *TxPool) maybeAcceptCoincaseTx(tx *btcutil.Tx, rejectDupOrphans bool) (
 //
 // This function MUST be called with the mempool lock held (for writes).
 func (mp *TxPool) maybeAcceptTransaction(tx *btcutil.Tx, isNew, rateLimit, rejectDupOrphans bool) ([]*chainhash.Hash, *TxDesc, error) {
-	isCoincase := blockchain.IsCoincase(tx)
-	if isCoincase {
-		return mp.maybeAcceptCoincaseTx(tx, rejectDupOrphans)
-	}
-
 	txHash := tx.Hash()
 
 	// If a transaction has iwtness data, and segwit isn't active yet, If
@@ -1277,15 +1271,43 @@ func (mp *TxPool) ProcessTransaction(tx *btcutil.Tx, allowOrphan, rateLimit bool
 	return nil, err
 }
 
-func IsPostDated(tx *btcutil.Tx) bool {
-	msgTx := tx.MsgTx()
+func (mp *TxPool) ProcessCoincaseTransaction(tx *btcutil.Tx, allowOrphan, rateLimit bool, tag Tag) ([]*TxDesc, error) {
+	log.Tracef("Processing coincase transaction %v", tx.Hash())
 
-	// A post-dated tx must only have one transaction input.
-	if len(msgTx.TxIn) != 1 {
-		return false
+	// Protect concurrent access.
+	mp.mtx.Lock()
+	defer mp.mtx.Unlock()
+
+	// Potentially accept the transaction to the memory pool.
+	coincase, err := mp.maybeAcceptCoincaseTx(tx, true)
+	if err != nil {
+		return nil, err
 	}
 
-	return false
+	// Post-dated tx is in orphan pool, process it
+	newTxs := mp.processOrphans(tx)
+
+	// Should accept also the post-dated tx that used this coincase
+	if len(newTxs) != 0 {
+		str := fmt.Sprintf("Couldn't find the post-dated tx that references coincase tx :%v. "+
+			"post-dated tx should be sent before coincase.", tx.Hash())
+		return nil, txRuleError(wire.RejectMissingPostD, str)
+	}
+
+	if len(newTxs) > 1 {
+		str := fmt.Sprintf("Coincase can not be referenced by more than one post-dated tx.")
+		return nil, txRuleError(wire.RejectMultiplePostD, str)
+	}
+
+	acceptedTxs := make([]*TxDesc, 2)
+	// Add the coincase transaction first so remote nodes
+	// do not add post-dated as orphan.
+	acceptedTxs[0] = coincase
+
+	postDatedTx := newTxs[0]
+	acceptedTxs[1] = postDatedTx
+
+	return acceptedTxs, nil
 }
 
 // Count returns the number of transactions in the main pool.  It does not

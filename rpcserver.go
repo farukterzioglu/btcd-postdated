@@ -165,14 +165,16 @@ var rpcHandlersBeforeInit = map[string]commandHandler{
 	"ping":                  handlePing,
 	"searchrawtransactions": handleSearchRawTransactions,
 	"sendrawtransaction":    handleSendRawTransaction,
-	"setgenerate":           handleSetGenerate,
-	"stop":                  handleStop,
-	"submitblock":           handleSubmitBlock,
-	"uptime":                handleUptime,
-	"validateaddress":       handleValidateAddress,
-	"verifychain":           handleVerifyChain,
-	"verifymessage":         handleVerifyMessage,
-	"version":               handleVersion,
+	// TODO : Add any additional codes for 'sendrawcoincasetx' (like sendrawtransaction)
+	"sendrawcoincasetx": handleSendRawCoincaseTransaction,
+	"setgenerate":       handleSetGenerate,
+	"stop":              handleStop,
+	"submitblock":       handleSubmitBlock,
+	"uptime":            handleUptime,
+	"validateaddress":   handleValidateAddress,
+	"verifychain":       handleVerifyChain,
+	"verifymessage":     handleVerifyMessage,
+	"version":           handleVersion,
 }
 
 // list of commands that we recognize, but for which btcd has no support because
@@ -3298,8 +3300,82 @@ func handleSearchRawTransactions(s *rpcServer, cmd interface{}, closeChan <-chan
 	return srtList, nil
 }
 
-// TODO : Create a new method for Post-dated tx and return hash of coincase & postdatex tx (this return only coincase)
-// Remove both if coincase not accepted or post-dated is not accepted.
+// TODO : Remove both if coincase not accepted or post-dated is not accepted.
+func handleSendRawCoincaseTransaction(s *rpcServer, cmd interface{}, closeChan <-chan struct{}) (interface{}, error) {
+	c := cmd.(*btcjson.SendRawTransactionCmd)
+	// Deserialize and send off to tx relay
+	hexStr := c.HexTx
+	if len(hexStr)%2 != 0 {
+		hexStr = "0" + hexStr
+	}
+	serializedTx, err := hex.DecodeString(hexStr)
+	if err != nil {
+		return nil, rpcDecodeHexError(hexStr)
+	}
+	var msgTx wire.MsgTx
+	err = msgTx.Deserialize(bytes.NewReader(serializedTx))
+	if err != nil {
+		return nil, &btcjson.RPCError{
+			Code:    btcjson.ErrRPCDeserialization,
+			Message: "TX decode failed: " + err.Error(),
+		}
+	}
+
+	// Use 0 for the tag to represent local node.
+	tx := btcutil.NewTx(&msgTx)
+	acceptedTxs, err := s.cfg.TxMemPool.ProcessCoincaseTransaction(tx, false, false, 0)
+	if err != nil {
+		// When the error is a rule error, it means the transaction was
+		// simply rejected as opposed to something actually going wrong,
+		// so log it as such.  Otherwise, something really did go wrong,
+		// so log it as an actual error.  In both cases, a JSON-RPC
+		// error is returned to the client with the deserialization
+		// error code (to match bitcoind behavior).
+		if _, ok := err.(mempool.RuleError); ok {
+			rpcsLog.Debugf("Rejected transaction %v: %v", tx.Hash(),
+				err)
+		} else {
+			rpcsLog.Errorf("Failed to process transaction %v: %v",
+				tx.Hash(), err)
+		}
+		return nil, &btcjson.RPCError{
+			Code:    btcjson.ErrRPCDeserialization,
+			Message: "TX rejected: " + err.Error(),
+		}
+	}
+
+	// When the transaction was accepted it should be the first item in the
+	// returned array of accepted transactions.  The only way this will not
+	// be true is if the API for ProcessTransaction changes and this code is
+	// not properly updated, but ensure the condition holds as a safeguard.
+	//
+	// Also, since an error is being returned to the caller, ensure the
+	// transaction is removed from the memory pool.
+	if len(acceptedTxs) == 0 || !acceptedTxs[0].Tx.Hash().IsEqual(tx.Hash()) {
+		s.cfg.TxMemPool.RemoveTransaction(tx, true)
+
+		errStr := fmt.Sprintf("transaction %v is not in accepted list",
+			tx.Hash())
+		return nil, internalRPCError(errStr, "")
+	}
+
+	// Generate and relay inventory vectors for all newly accepted
+	// transactions into the memory pool due to the original being
+	// accepted.
+	s.cfg.ConnMgr.RelayTransactions(acceptedTxs)
+
+	// Notify both websocket and getblocktemplate long poll clients of all
+	// newly accepted transactions.
+	s.NotifyNewTransactions(acceptedTxs)
+
+	// Keep track of all the sendrawtransaction request txns so that they
+	// can be rebroadcast if they don't make their way into a block.
+	txD := acceptedTxs[0]
+	iv := wire.NewInvVect(wire.InvTypeTx, txD.Tx.Hash())
+	s.cfg.ConnMgr.AddRebroadcastInventory(iv, txD)
+
+	return tx.Hash().String(), nil
+}
 
 // handleSendRawTransaction implements the sendrawtransaction command.
 func handleSendRawTransaction(s *rpcServer, cmd interface{}, closeChan <-chan struct{}) (interface{}, error) {
@@ -3354,11 +3430,6 @@ func handleSendRawTransaction(s *rpcServer, cmd interface{}, closeChan <-chan st
 	// transaction is removed from the memory pool.
 	if len(acceptedTxs) == 0 || !acceptedTxs[0].Tx.Hash().IsEqual(tx.Hash()) {
 		s.cfg.TxMemPool.RemoveTransaction(tx, true)
-
-		// It is a post dated tx and it have been added to orphan pool
-		if tx.MsgTx().Version == wire.PostDatedTxVersion {
-			return tx.Hash().String(), nil
-		}
 
 		errStr := fmt.Sprintf("transaction %v is not in accepted list",
 			tx.Hash())
