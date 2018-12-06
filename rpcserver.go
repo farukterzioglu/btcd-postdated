@@ -278,6 +278,7 @@ var rpcLimited = map[string]struct{}{
 	"gettxout":              {},
 	"searchrawtransactions": {},
 	"sendrawtransaction":    {},
+	"sendrawcoincasetx":     {},
 	"submitblock":           {},
 	"uptime":                {},
 	"validateaddress":       {},
@@ -3302,7 +3303,7 @@ func handleSearchRawTransactions(s *rpcServer, cmd interface{}, closeChan <-chan
 
 // TODO : Remove both if coincase not accepted or post-dated is not accepted.
 func handleSendRawCoincaseTransaction(s *rpcServer, cmd interface{}, closeChan <-chan struct{}) (interface{}, error) {
-	c := cmd.(*btcjson.SendRawTransactionCmd)
+	c := cmd.(*btcjson.SendRawCoincaseTxCmd)
 	// Deserialize and send off to tx relay
 	hexStr := c.HexTx
 	if len(hexStr)%2 != 0 {

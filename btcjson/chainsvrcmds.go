@@ -652,6 +652,19 @@ func NewSendRawTransactionCmd(hexTx string, allowHighFees *bool) *SendRawTransac
 	}
 }
 
+// SendRawCoincaseTxCmd defines the sendrawcoincasetx JSON-RPC command.
+type SendRawCoincaseTxCmd struct {
+	HexTx         string
+	AllowHighFees *bool `jsonrpcdefault:"false"`
+}
+
+func NewSendRawCoincaseTxCmd(hexTx string, allowHighFees *bool) *SendRawCoincaseTxCmd {
+	return &SendRawCoincaseTxCmd{
+		HexTx:         hexTx,
+		AllowHighFees: allowHighFees,
+	}
+}
+
 // SetGenerateCmd defines the setgenerate JSON-RPC command.
 type SetGenerateCmd struct {
 	Generate     bool
@@ -817,6 +830,7 @@ func init() {
 	MustRegisterCmd("reconsiderblock", (*ReconsiderBlockCmd)(nil), flags)
 	MustRegisterCmd("searchrawtransactions", (*SearchRawTransactionsCmd)(nil), flags)
 	MustRegisterCmd("sendrawtransaction", (*SendRawTransactionCmd)(nil), flags)
+	MustRegisterCmd("sendrawcoincasetx", (*SendRawCoincaseTxCmd)(nil), flags)
 	MustRegisterCmd("setgenerate", (*SetGenerateCmd)(nil), flags)
 	MustRegisterCmd("stop", (*StopCmd)(nil), flags)
 	MustRegisterCmd("submitblock", (*SubmitBlockCmd)(nil), flags)
