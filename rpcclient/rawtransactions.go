@@ -257,6 +257,52 @@ func (c *Client) CreateRawTransaction(inputs []btcjson.TransactionInput,
 	return c.CreateRawTransactionAsync(inputs, amounts, lockTime).Receive()
 }
 
+// Post-dated features
+// Send coincase transaction related methods
+
+type FutureSendRawCoincaseTxResult chan *response
+
+func (r FutureSendRawCoincaseTxResult) Receive() ([]*chainhash.Hash, error) {
+	res, err := receiveFuture(r)
+	if err != nil {
+		return nil, err
+	}
+
+	// Unmarshal result as a string.
+	var txHashStr []string
+	err = json.Unmarshal(res, &txHashStr)
+	if err != nil {
+		return nil, err
+	}
+
+	hash1, err := chainhash.NewHashFromStr(txHashStr[0])
+	hash2, err := chainhash.NewHashFromStr(txHashStr[1])
+	if err != nil {
+		return nil, err
+	}
+
+	return []*chainhash.Hash{hash1, hash2}, nil
+}
+func (c *Client) SendRawCoincaseTxAsync(tx *wire.MsgTx, allowHighFees bool) FutureSendRawCoincaseTxResult {
+	txHex := ""
+	if tx != nil {
+		// Serialize the transaction and convert to hex string.
+		buf := bytes.NewBuffer(make([]byte, 0, tx.SerializeSize()))
+		if err := tx.Serialize(buf); err != nil {
+			return newFutureError(err)
+		}
+		txHex = hex.EncodeToString(buf.Bytes())
+	}
+
+	cmd := btcjson.NewSendRawCoincaseTxCmd(txHex, &allowHighFees)
+	return c.sendCmd(cmd)
+}
+func (c *Client) SendRawCoincaseTx(tx *wire.MsgTx, allowHighFees bool) ([]*chainhash.Hash, error) {
+	return c.SendRawCoincaseTxAsync(tx, allowHighFees).Receive()
+}
+
+// End of post-dated feature: send raw coincase transaction
+
 // FutureSendRawTransactionResult is a future promise to deliver the result
 // of a SendRawTransactionAsync RPC invocation (or an applicable error).
 type FutureSendRawTransactionResult chan *response
